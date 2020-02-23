@@ -292,8 +292,6 @@ class CrystalGraphConvNet(nn.Module):
         grad = torch.FloatTensor([100.0])
         step_count = 0
                                          
-#         while (torch.max(torch.abs(steepest_descent_step))>0.0005 and step_count<self.max_opt_steps) or step_count<self.min_opt_steps:
-#         for _ in range(5):
 
         distance = self.get_distance(atom_pos, cells, nbr_fea_offset, nbr_fea_idx)
 
@@ -322,9 +320,10 @@ class CrystalGraphConvNet(nn.Module):
         steepest_descent_step =  - self.opt_step_size*grad
 
 #         #### Momentum 
-#         V = self.momentum*V + (1-self.momentum)*grad
-#         atom_pos = atom_pos - self.opt_step_size * V
+#             V = self.momentum*V + (1-self.momentum)*grad
+#             atom_pos = atom_pos - self.opt_step_size * V
 #         step_count += 1
+
         atom_pos = atom_pos - self.opt_step_size * grad
 
         return atom_pos[free_atom_idx]

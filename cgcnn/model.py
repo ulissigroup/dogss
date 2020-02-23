@@ -141,7 +141,7 @@ class CrystalGraphConvNet(nn.Module):
         if n_h_const > 1:
             self.const_fcs = nn.ModuleList([nn.Linear(h_fea_len_const, h_fea_len_const)
                                       for _ in range(n_h_const-1)])
-            self.const_softpluses = nn.ModuleList([nn.Sigmoid() #LeakyReLU()
+            self.const_softpluses = nn.ModuleList([nn.Sigmoid() 
                                              for _ in range(n_h_const-1)])
             self.const_bn = nn.ModuleList([nn.BatchNorm1d(h_fea_len_const)
                                              for _ in range(n_h_const-1)])
@@ -159,7 +159,7 @@ class CrystalGraphConvNet(nn.Module):
             if n_h_D > 1:
                 self.D_fcs = nn.ModuleList([nn.Linear(h_fea_len_D, h_fea_len_D)
                                           for _ in range(n_h_D-1)])
-                self.D_softpluses = nn.ModuleList([nn.Sigmoid() #LeakyReLU()
+                self.D_softpluses = nn.ModuleList([nn.Sigmoid() 
                                                  for _ in range(n_h_D-1)])
                 self.D_bn = nn.ModuleList([nn.BatchNorm1d(h_fea_len_D)
                                                  for _ in range(n_h_D-1)])
@@ -172,7 +172,7 @@ class CrystalGraphConvNet(nn.Module):
 
 
     def forward(self, atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, crystal_atom_idx, atom_pos, nbr_pos, atom_pos_idx, cells, fixed_atom_mask, atom_pos_final):
-#     def forward(self, atom_fea, nbr_fea_idx, nbr_fea_offset, crystal_atom_idx, atom_pos, cells, fixed_atom_mask, atom_pos_final):
+
         """
         Forward pass
 
@@ -225,11 +225,9 @@ class CrystalGraphConvNet(nn.Module):
         
         bond_fea = torch.cat((atom_features, nbr_features, nbr_fea), dim=2)
         
-        #First network to predict the adjustment to the initial distance for the bond springs
 
         bond_dist_fea = bond_fea
         #Set the bond spring distance to the correction plus the initial position
-        
         bond_distance = self.bond_distance(bond_dist_fea)
         N, M, C = bond_distance.shape
         bond_distance = self.bond_distance_softplus(self.bond_distance_bn(bond_distance.view(-1, C)).view(N, M, C))
@@ -241,8 +239,6 @@ class CrystalGraphConvNet(nn.Module):
         bond_distance = self.bond_distance_softplus((self.bond_distance2(bond_distance)+distance)) #+ distance
         
         #Second set of dense networks to predict the spring constant for each spring
-
-
         bond_const_fea = bond_fea
         bond_constant = self.bond_constant(bond_const_fea)
         N, M, C = bond_constant.shape

@@ -7,7 +7,6 @@ import torch.nn as nn
 import numpy as np
 from ase.geometry import wrap_positions
 import copy
-# from data import GaussianDistance
 
 class ConvLayer(nn.Module):
     """
@@ -141,7 +140,7 @@ class CrystalGraphConvNet(nn.Module):
         if n_h_const > 1:
             self.const_fcs = nn.ModuleList([nn.Linear(h_fea_len_const, h_fea_len_const)
                                       for _ in range(n_h_const-1)])
-            self.const_softpluses = nn.ModuleList([nn.Sigmoid() #LeakyReLU()
+            self.const_softpluses = nn.ModuleList([nn.Sigmoid() 
                                              for _ in range(n_h_const-1)])
             self.const_bn = nn.ModuleList([nn.BatchNorm1d(h_fea_len_const)
                                              for _ in range(n_h_const-1)])
@@ -159,7 +158,7 @@ class CrystalGraphConvNet(nn.Module):
             if n_h_D > 1:
                 self.D_fcs = nn.ModuleList([nn.Linear(h_fea_len_D, h_fea_len_D)
                                           for _ in range(n_h_D-1)])
-                self.D_softpluses = nn.ModuleList([nn.Sigmoid() #LeakyReLU()
+                self.D_softpluses = nn.ModuleList([nn.Sigmoid() 
                                                  for _ in range(n_h_D-1)])
                 self.D_bn = nn.ModuleList([nn.BatchNorm1d(h_fea_len_D)
                                                  for _ in range(n_h_D-1)])
@@ -177,7 +176,7 @@ class CrystalGraphConvNet(nn.Module):
         if n_h_grad > 1:
             self.grad_fcs = nn.ModuleList([nn.Linear(grad_hea_len, grad_hea_len)
                                       for _ in range(n_h_grad-1)])
-            self.grad_softpluses = nn.ModuleList([nn.Sigmoid() #LeakyReLU()
+            self.grad_softpluses = nn.ModuleList([nn.Sigmoid() 
                                              for _ in range(n_h_grad-1)])
             self.grad_bn = nn.ModuleList([nn.BatchNorm1d(grad_hea_len)
                                              for _ in range(n_h_grad-1)])

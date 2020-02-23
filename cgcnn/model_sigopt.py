@@ -120,15 +120,12 @@ class CrystalGraphConvNet(nn.Module):
                                     nbr_fea_len=nbr_fea_len)
                                     for _ in range(n_conv)])
         
-        self.conv_to_fc = nn.Linear(2*atom_fea_len + nbr_fea_len, h_fea_len)
-        self.conv_to_fc_softplus = nn.LeakyReLU()
-        
         self.bond_distance = nn.Linear(2*atom_fea_len + nbr_fea_len, h_fea_len_dist)
-        self.bond_distance_bn = nn.BatchNorm1d(h_fea_len)
+        self.bond_distance_bn = nn.BatchNorm1d(h_fea_len_dist)
         self.bond_distance_softplus = nn.Softplus()
 
         self.bond_constant = nn.Linear(2*atom_fea_len + nbr_fea_len, h_fea_len_const)
-        self.bond_constant_bn = nn.BatchNorm1d(h_fea_len)    
+        self.bond_constant_bn = nn.BatchNorm1d(h_fea_len_const)    
         self.bond_const_softplus = nn.Softplus()
 
         
@@ -316,8 +313,8 @@ class CrystalGraphConvNet(nn.Module):
             atom_pos = atom_pos - self.opt_step_size * V
             step_count += 1
 
-        return atom_pos[free_atom_idx], grad, atom_pos 
-
+        return atom_pos[free_atom_idx]
+    
     def get_distance(self, atom_pos, cells, nbr_fea_offset, nbr_fea_idx):
         nbr_pos = atom_pos[nbr_fea_idx]
         differ = nbr_pos - atom_pos.unsqueeze(1)+ torch.bmm(nbr_fea_offset, cells)

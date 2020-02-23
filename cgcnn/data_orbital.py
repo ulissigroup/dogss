@@ -114,7 +114,7 @@ def collate_pool(dataset_list):
         else:
             batch_target.append(torch.Tensor([0]))
 
-        batch_atom_pos_final.append(atom_pos_final[free_atom_idx].view(-1,3))
+        batch_atom_pos_final.append(atom_pos_final.view(-1,3))
     
         cell_idx += 1
         base_idx += n_i

@@ -308,8 +308,9 @@ class CrystalGraphConvNet(nn.Module):
             V = self.momentum*V + (1-self.momentum)*grad
             atom_pos = atom_pos - self.opt_step_size * V
             step_count += 1
-
-        return atom_pos[free_atom_idx], bond_distance
+            
+        distance_final = self.get_distance(atom_pos_final, cells, nbr_fea_offset, nbr_fea_idx)
+        return (atom_pos[free_atom_idx], bond_distance, distance_final)
     
     def get_distance(self, atom_pos, cells, nbr_fea_offset, nbr_fea_idx):
         nbr_pos = atom_pos[nbr_fea_idx]

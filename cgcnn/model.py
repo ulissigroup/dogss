@@ -36,6 +36,11 @@ class ConvLayer(nn.Module):
         self.bn2 = nn.BatchNorm1d(self.atom_fea_len)
         self.softplus2 = nn.LeakyReLU()
         
+        self.fc_full2 = nn.Linear(2*self.atom_fea_len+self.nbr_fea_len,
+                                 2*self.nbr_fea_len)
+        self.nbr_bn1 = nn.BatchNorm1d(2*self.nbr_fea_len)
+        self.nbr_bn2 = nn.BatchNorm1d(self.nbr_fea_len)
+        
     def forward(self, atom_in_fea, nbr_fea, nbr_fea_idx):
         """
         Forward pass
@@ -67,17 +72,31 @@ class ConvLayer(nn.Module):
         total_nbr_fea = torch.cat(
             [atom_in_fea.unsqueeze(1).expand(N, M, self.atom_fea_len),
              atom_nbr_fea, nbr_fea], dim=2)
+        
         total_gated_fea = self.fc_full(total_nbr_fea)
         total_gated_fea = self.bn1(total_gated_fea.view(
             -1, self.atom_fea_len*2)).view(N, M, self.atom_fea_len*2)
-        nbr_filter, nbr_core = total_gated_fea.chunk(2, dim=2)
+        atom_filter, atom_core = total_gated_fea.chunk(2, dim=2)
+        atom_filter = self.sigmoid(atom_filter)
+        atom_core = self.softplus1(atom_core)
+        atom_sumed = torch.sum(atom_filter * atom_core, dim=1)
+        atom_sumed = self.bn2(atom_sumed)
+        atom_out = self.softplus2(atom_in_fea + atom_sumed)
+        
+        total_gated_nbr_fea = self.fc_full2(total_nbr_fea)
+        total_gated_nbr_fea = self.nbr_bn1(total_gated_nbr_fea.view(
+            -1, self.nbr_fea_len*2)).view(N, M, self.nbr_fea_len*2)
+        nbr_filter, nbr_core = total_gated_nbr_fea.chunk(2, dim=2)
         nbr_filter = self.sigmoid(nbr_filter)
         nbr_core = self.softplus1(nbr_core)
-        nbr_sumed = torch.sum(nbr_filter * nbr_core, dim=1)
-        nbr_sumed = self.bn2(nbr_sumed)
-        out = self.softplus2(atom_in_fea + nbr_sumed)
-        return out
-
+#         nbr_sumed = torch.sum(nbr_filter * nbr_core, dim=1)
+        nbr_sumed = nbr_filter * nbr_core
+        nbr_sumed = self.nbr_bn2(nbr_sumed.view(-1,self.nbr_fea_len)).view(N,M, self.nbr_fea_len)
+        
+        nbr_out = self.softplus2(nbr_sumed + nbr_fea)
+        
+        
+        return atom_out, nbr_out
 
 class CrystalGraphConvNet(nn.Module):
     """
@@ -169,8 +188,10 @@ class CrystalGraphConvNet(nn.Module):
         self.min_opt_steps=min_opt_steps
         self.max_opt_steps=max_opt_steps
         self.opt_step_size=opt_step_size
-
-
+        
+        self.sigmoid = nn.Sigmoid()
+        self.softplus = nn.Softplus()
+        
     def forward(self, atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, crystal_atom_idx, atom_pos, nbr_pos, atom_pos_idx, cells, fixed_atom_mask, atom_pos_final):
 
         """
@@ -207,17 +228,17 @@ class CrystalGraphConvNet(nn.Module):
           Per atom contributions
 
         """
+        
         atom_pos = atom_pos.requires_grad_(True)
         atom_fea = self.embedding(atom_fea)
         
         free_atom_idx = np.where(fixed_atom_mask.cpu().numpy() == 0)[0]
         fixed_atom_idx = np.where(fixed_atom_mask.cpu().numpy() == 1)[0]
-
+        
         distance = self.get_distance(atom_pos, cells, nbr_fea_offset, nbr_fea_idx)
-#         nbr_fea = self.gdf.expand(distance)
         
         for conv_func in self.convs:
-            atom_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
+            atom_fea, nbr_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
 
         # Creating bond feature
         atom_features = atom_fea.unsqueeze(1).repeat(1, nbr_fea_idx.shape[1], 1)        
@@ -230,27 +251,32 @@ class CrystalGraphConvNet(nn.Module):
         #Set the bond spring distance to the correction plus the initial position
         bond_distance = self.bond_distance(bond_dist_fea)
         N, M, C = bond_distance.shape
-        bond_distance = self.bond_distance_softplus(self.bond_distance_bn(bond_distance.view(-1, C)).view(N, M, C))
-
+        
         if hasattr(self, 'dist_fcs') and hasattr(self, 'dist_softpluses'):
+            bond_distance = self.bond_distance_softplus(self.bond_distance_bn(bond_distance.view(-1, C)).view(N, M, C))
             for fc, softplus,bn in zip(self.dist_fcs, self.dist_softpluses, self.dist_bn):
                 bond_distance = softplus(bn(fc(bond_distance).view(-1,C)).view(N,M,C))
-        
-        bond_distance = self.bond_distance_softplus((self.bond_distance2(bond_distance)+distance)) #+ distance
+            bond_distance = self.bond_distance_softplus(self.bond_distance2(bond_distance)+ distance) #+ distance
+            
+        else:
+            bond_distance = self.bond_distance_softplus(self.bond_distance_bn(bond_distance.view(-1, C)).view(N, M, C) + distance)
+            bond_distance = torch.mean(bond_distance, dim=2).unsqueeze(-1)       
+            
         
         #Second set of dense networks to predict the spring constant for each spring
         bond_const_fea = bond_fea
         bond_constant = self.bond_constant(bond_const_fea)
         N, M, C = bond_constant.shape
-        bond_constant = self.bond_const_softplus(self.bond_constant_bn(bond_constant.view(-1, C)).view(N, M, C))
         
         if hasattr(self, 'const_fcs') and hasattr(self, 'const_softpluses'):
+            bond_constant = self.bond_const_softplus(self.bond_constant_bn(bond_constant.view(-1, C)).view(N, M, C))
             for fc, softplus,bn in zip(self.const_fcs, self.const_softpluses, self.const_bn):
                 bond_constant = softplus(bn(fc(bond_constant).view(-1,C)).view(N,M,C))
-        
-        bond_constant = self.bond_const_softplus(self.bond_constant2(bond_constant))
-        
-        
+            bond_constant = self.bond_const_softplus(self.bond_constant2(bond_constant)) / len(bond_constant)
+        else:
+            bond_constant = self.bond_const_softplus(self.bond_constant_bn(bond_constant.view(-1, C)).view(N, M, C))
+            bond_constant = torch.mean(bond_constant, dim=2).unsqueeze(-1) / len(bond_constant)
+
         if self.energy_mode == "Morse" or self.energy_mode == "LJ":
             const_D = bond_fea
             const_D = self.D_layer(const_D)
@@ -266,7 +292,6 @@ class CrystalGraphConvNet(nn.Module):
             else:
                 const_D = self.D_sigmoid(self.D_constant(const_D))
 
-        
         steepest_descent_step=torch.FloatTensor([1.0])
         V = torch.tensor(0.0)
         save_track = [atom_pos]
@@ -285,10 +310,9 @@ class CrystalGraphConvNet(nn.Module):
                 LJ_energy = (const_D/len(const_D)) * ((bond_distance/distance)**12 - 2*(bond_distance/distance)**6)
                 potential_E = LJ_energy + bond_energy
             else:
-#                 bond_energy = torch.abs(bond_constant*(bond_distance-distance)**2.) 
                 potential_E = bond_constant*(bond_distance-distance)**2
             
-            grad_E = potential_E.sum() #.sum()
+            grad_E = potential_E.sum()
             grad = torch.autograd.grad(grad_E, atom_pos, retain_graph=True, create_graph=True)[0]
             
             grad[fixed_atom_idx] = 0
@@ -309,8 +333,8 @@ class CrystalGraphConvNet(nn.Module):
             atom_pos = atom_pos - self.opt_step_size * V
             step_count += 1
 
-        return atom_pos[free_atom_idx], bond_distance
-    
+        return atom_pos[free_atom_idx]
+  
     def get_distance(self, atom_pos, cells, nbr_fea_offset, nbr_fea_idx):
         nbr_pos = atom_pos[nbr_fea_idx]
         differ = nbr_pos - atom_pos.unsqueeze(1)+ torch.bmm(nbr_fea_offset, cells)
@@ -323,50 +347,3 @@ class CrystalGraphConvNet(nn.Module):
         
         distance = torch.sqrt(differ_sum).unsqueeze(-1)            
         return distance
-    
-    def pooling(self, bond_fea_layer, crystal_atom_idx):
-        """
-        Pooling the atom features to crystal features
-
-        N: Total number of atoms in the batch
-        N0: Total number of crystals in the batch
-
-        Parameters
-        ----------
-
-        atom_fea: Variable(torch.Tensor) shape (N, 1)
-          Atom feature vectors of the batch
-        crystal_atom_idx: list of torch.LongTensor of length N0
-          Mapping from the crystal idx to atom idx
-        distances: torch.Tensor shape (N, 1)
-          Storing connectivity information of atoms        
-        """
-        assert sum([len(idx_map) for idx_map in crystal_atom_idx]) ==\
-            bond_fea_layer.data.shape[0]
-#         assert sum([len(idx_map) for idx_map in crystal_fixed_atom_idx]) ==\
-#             fixed_atom_idx.data.shape[0]
-        
-        
-        summed_fea = torch.unsqueeze(torch.stack([torch.mean(bond_fea_layer[idx_map]) for idx_map in crystal_atom_idx]),1)
-        
-        
-        return summed_fea
-class GaussianDistance(object):
-    """
-    Expands the distance by Gaussian basis.
-
-    Unit: angstrom
-    """
-    def __init__(self, dmin, dmax, step_size, var=None):
-
-        assert dmin < dmax
-        assert dmax - dmin > step_size
-        self.filter = torch.arange(dmin, dmax+step_size, step_size).cuda()
-        if var is None:
-            var = step_size
-        self.var = var
-
-    def expand(self, distances):
-        return torch.exp(-(distances - self.filter)**2 /
-                      self.var**2)
-    

@@ -63,11 +63,10 @@ def collate_pool(dataset_list):
     crystal_atom_idx, crystal_fixed_atom_idx, batch_target = [], [], []
     crystal_cell, crystal_cell_idx = [], []
     fixed_atom_mask, batch_atom_pos_idx, batch_atom_pos_final = [], [], []
-    batch_ads_tag = []
     base_idx = 0
     cell_idx = 0
     base_fixed_idx = 0
-    for i, ((atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, atom_pos, nbr_pos, atom_pos_idx, cells, ads_tag, fixed_base, free_atom_idx, atom_pos_final), target)\
+    for i, ((atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, atom_pos, nbr_pos, atom_pos_idx, cells, fixed_base, free_atom_idx, atom_pos_final), target)\
             in enumerate(dataset_list):
             
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
@@ -99,22 +98,23 @@ def collate_pool(dataset_list):
         free_atom_idx2 = np.where(fixed_base ==0)[0]
         fixed_atom_mask.append(torch.LongTensor(fixed_base))
         
+        
         assert free_atom_idx.cpu().detach().numpy().all() == free_atom_idx2.all()
         
         batch_atom_pos_idx.append(atom_pos_idx + base_idx)
         
-        batch_ads_tag.append(torch.LongTensor(ads_tag))
-        
-        ads_idx = np.where(ads_tag == 1)[0]
-
+#         if type(target) != float:
+#             batch_target.append(torch.Tensor(target[0]))
+#         else:
+#             batch_target.append(torch.Tensor(0))
         if type(target) is not float:
+#             batch_target.append(torch.Tensor(target[0][free_atom_idx]).view(-1,3))
             batch_target.append(torch.Tensor(target[0]).view(-1,3))
+
         else:
             batch_target.append(torch.Tensor([0]))
 
-        batch_atom_pos_final.append(atom_pos_final.view(-1,3)) 
-        
-        
+        batch_atom_pos_final.append(atom_pos_final.view(-1,3))
     
         cell_idx += 1
         base_idx += n_i
@@ -132,12 +132,12 @@ def collate_pool(dataset_list):
             'nbr_pos':torch.cat(batch_nbr_pos, dim=0),
             'atom_pos_idx': torch.cat(batch_atom_pos_idx, dim=0),
             'cells': torch.cat(crystal_cell, dim=0),
-            'ads_tag_base': torch.cat(batch_ads_tag),
             'fixed_atom_mask': torch.cat(fixed_atom_mask),
             'atom_pos_final': torch.cat(batch_atom_pos_final)}, torch.cat(batch_target)#torch.cat(batch_atom_pos_final) 
 
 # torch.FloatTensor(batch_target) 
 # torch.cat(batch_target).view(-1,1)
+
 
 
 class GaussianDistance(object):
@@ -298,7 +298,7 @@ class StructureData():
     nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
     nbr_fea_idx: torch.LongTensor shape (n_i, M)
     """
-    def __init__(self, atoms_list, atoms_list_initial_config, atom_init_loc, max_num_nbr=12, radius=8, dmin=0, step=0.2, random_seed=123, use_voronoi=False, use_fixed_info=False, use_tag=False, use_distance=False, bond_property=True, train_geometry='initial', is_initial=True, orbitals=None, symbols=None, UFF=None, orbital_only=False, r_stats=None, x_stats=None):
+    def __init__(self, atoms_list, atoms_list_initial_config, atom_init_loc, max_num_nbr=12, radius=8, dmin=0, step=0.2, random_seed=123, use_voronoi=False, use_fixed_info=False, use_tag=False, use_distance=False, bond_property=True, train_geometry='initial', is_initial=True, orbitals=None, symbols=None):
         
         #this copy is very important; otherwise things ran, but there was some sort 
         # of shuffle that was affecting the real list, resulting in weird loss
@@ -324,10 +324,6 @@ class StructureData():
         self.is_initial = is_initial
         self.orbitals = orbitals
         self.symbols = symbols
-        self.UFF = UFF
-        self.orbital_only = orbital_only
-        self.r_stats = r_stats
-        self.x_stats = x_stats
         
     def __len__(self):
         return len(self.atoms_list)
@@ -368,44 +364,12 @@ class StructureData():
                     print(element,"atom is not in the symbol dictionary")
                     
             atom_fea = np.hstack([atom_fea, np.array(orbital_fea)])
-            
-            if self.orbital_only:
-                atom_fea = np.array(orbital_fea)
         
-        # append UFF paramenters
-        if self.UFF:
-            UFF_fea = []
-            nbr_UFF_fea = []
-            r,x =[],[]
-            for element in atoms.get_chemical_symbols():
-                ### Exlcude x for now, only use r with 15 dim of OHE
-#                 base = np.zeros(30, dtype=int)
-                base = np.zeros(16, dtype=int)
-                idx_r = self.UFF[element][1]
-#                 idx_x = self.UFF[element][3]
-                base[idx_r] = 1
-#                 base[idx_x] = 1
-                UFF_fea.append(base)
-                r.append(self.UFF[element][0])
-#                 x.append(self.UFF[element][2])
-                
-            atom_fea = np.hstack([atom_fea, np.array(UFF_fea)])
-            r, x = np.array(r), np.array(x)
-
         
         # If use_tag=True, then add the tag as an atom feature
         if self.use_tag:
             atom_fea = np.hstack([atom_fea,atoms.get_tags().reshape((-1,1))])
             
-        # If use_fixed_info=True, then add whether the atom is fixed by ASE constraint to the features
-#         if self.use_fixed_info:
-#             fix_loc, = np.where([type(constraint)==FixAtoms for constraint in atoms.constraints])
-#             fix_atoms_indices = set(atoms.constraints[fix_loc[0]].get_indices())
-#             fixed_atoms = np.array([i in fix_atoms_indices for i in range(len(atoms))]).reshape((-1,1))
-
-            
-#             atom_fea = np.hstack([atom_fea,fixed_atoms])
-
         # for bond distance optimization    
         if self.bond_property:
             all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True, include_image=True)
@@ -424,42 +388,8 @@ class StructureData():
 
             nbr_fea_idx, nbr_fea, nbr_fea_offset = np.array(nbr_fea_idx), np.array(nbr_fea), np.array(nbr_fea_offset)            
             nbr_fea = self.gdf.expand(nbr_fea)
-                    
-            if self.UFF:
-                nbr_fea_r = r[nbr_fea_idx].reshape(len(atoms), self.max_num_nbr) + r.repeat(self.max_num_nbr).reshape(len(atoms), self.max_num_nbr)
-
-#                 nbr_fea_x = 0.5* (x[nbr_fea_idx].reshape(len(atoms), self.max_num_nbr) + x.repeat(self.max_num_nbr).reshape(len(atoms), self.max_num_nbr))
-
-                r_min, r_max = self.r_stats
-#                 x_min, x_max = self.x_stats
-                std = 0.2
-                r_mu = np.arange(r_min, r_max+std, std)
-#                 x_mu = np.arange(x_min, x_max+std, std)
-
-                nbr_fea_r = np.exp(-(nbr_fea_r[..., np.newaxis] - r_mu)**2 / std**2)
-#                 nbr_fea_x = np.exp(-(nbr_fea_x[..., np.newaxis] - x_mu)**2 / std**2)
-
-                nbr_fea = np.concatenate((nbr_fea, nbr_fea_r), axis=2) # Exclude nbr_fea_x for now.
-    #             nbr_fea = np.concatenate((nbr_fea, nbr_fea_r, nbr_fea_x), axis=2)
-            
             distances = [0]*len(atoms)
 
-#             all_nbrs_final = crystal_final.get_all_neighbors(self.radius, include_index=True, include_image=True)
-#             all_nbrs_final = [sorted(nbrs_final, key=lambda x: x[1]) for nbrs_final in all_nbrs_final]
-#             nbr_fea_idx_final, nbr_fea_final, nbr_fea_offset_final = [], [], []
-
-#             for nbr_final in all_nbrs_final:
-#                 assert len(nbr_final) >= self.max_num_nbr
-
-#                 nbr_fea_idx_final.append(list(map(lambda x: x[2],
-#                                             nbr_final[:self.max_num_nbr])))
-#                 nbr_fea_final.append(list(map(lambda x: x[1],
-#                                         nbr_final[:self.max_num_nbr])))
-#                 nbr_fea_offset_final.append(list(map(lambda x: x[3], nbr_final[:self.max_num_nbr])))
-
-#             nbr_fea_idx_final, nbr_fea_final, nbr_fea_offset_final = np.array(nbr_fea_idx_final), np.array(nbr_fea_final), np.array(nbr_fea_offset_final)            
-#             nbr_fea_final = self.gdf.expand(nbr_fea_final)
-#             distances = [0]*len(atoms)
             try:
                 nbr_fea = torch.Tensor(nbr_fea)
             except RuntimeError:
@@ -468,22 +398,16 @@ class StructureData():
 
             nbr_pos = atoms.get_positions()[nbr_fea_idx.astype(int)]
             atom_pos = atoms.get_positions()
-            ads_tag = atoms.get_tags()
-#             atom_pos = np.tile(pos, (1,self.max_num_nbr)).reshape(len(atoms), self.max_num_nbr, 3)
-
-#             free_atom_idx = list(set(list(range(len(atom_pos))))-set(fixed_atom_idx))
 
             atom_pos_idx = np.repeat(np.arange(len(atom_pos)), self.max_num_nbr).reshape(len(atom_pos), self.max_num_nbr)
             cell = atoms.cell
             cells = np.tile(cell, (len(atoms),1)).reshape(len(atoms), 3, 3)
             
-#             nbr_pos_final = atoms_final.get_positions()[nbr_fea_idx_final.astype(int)]
-            ##########################
+          ##########################
 #             atom_pos_final = min_diff(atoms, atoms_final) + atoms.positions
-            
             atom_pos_final = atoms_final.positions
+        
         ####################
-#             atom_pos_final = np.tile(pos_final, (1,self.max_num_nbr)).reshape(len(atoms_final), self.max_num_nbr, 3)
             cell_final = atoms_final.cell
             cells_final = np.tile(cell_final, (len(atoms_final),1)).reshape(len(atoms_final), 3, 3)
             
@@ -511,20 +435,13 @@ class StructureData():
             
             atom_fea = np.hstack([atom_fea,fixed_base.reshape(-1,1)])
             
-        ads_tag = torch.LongTensor(ads_tag)    
+            
         atom_fea = torch.Tensor(atom_fea)
         free_atom_idx = torch.LongTensor(free_atom_idx)   
         fixed_base = torch.LongTensor(fixed_base)
-#         fixed_atom_idx = torch.LongTensor(fixed_atom_idx)
-
-#         nbr_fea_idx_final = torch.LongTensor(nbr_fea_idx_final)
-#         nbr_fea_offset_final = torch.Tensor(nbr_fea_offset_final)
         atom_pos_final = torch.Tensor(atom_pos_final)
-#         nbr_pos_final = torch.Tensor(nbr_pos_final)
-#         cells_final = torch.Tensor(cells_final)
 
-        return (atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, atom_pos, nbr_pos, atom_pos_idx, cells, ads_tag, fixed_base, free_atom_idx, atom_pos_final)
-#                 ,nbr_fea_idx_final, nbr_fea_offset_final, atom_pos_final, nbr_pos_final, cells_final)
+        return (atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, atom_pos, nbr_pos, atom_pos_idx, cells, fixed_base, free_atom_idx, atom_pos_final)
 
 class ListDataset():
     def __init__(self, list_in):

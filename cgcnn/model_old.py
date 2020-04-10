@@ -192,7 +192,8 @@ class CrystalGraphConvNet(nn.Module):
         self.sigmoid = nn.Sigmoid()
         self.softplus = nn.Softplus()
         
-    def forward(self, atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, crystal_atom_idx, atom_pos, nbr_pos, atom_pos_idx, cells, ads_tag_base, fixed_atom_mask, atom_pos_final):
+#     def forward(self, atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, crystal_atom_idx, atom_pos, nbr_pos, atom_pos_idx, cells, ads_tag_base, fixed_atom_mask, atom_pos_final):
+    def forward(self, atom_fea, nbr_fea, nbr_fea_idx, nbr_fea_offset, crystal_atom_idx, atom_pos, nbr_pos, atom_pos_idx, cells, fixed_atom_mask, atom_pos_final):
 
         """
         Forward pass
@@ -234,9 +235,10 @@ class CrystalGraphConvNet(nn.Module):
         
         free_atom_idx = np.where(fixed_atom_mask.cpu().numpy() == 0)[0]
         fixed_atom_idx = np.where(fixed_atom_mask.cpu().numpy() == 1)[0]
-        ads_idx = np.where(ads_tag_base.cpu().numpy() == 1)[0]
+#         ads_idx = np.where(ads_tag_base.cpu().numpy() == 1)[0]
         
         distance = self.get_distance(atom_pos, cells, nbr_fea_offset, nbr_fea_idx)
+#         nbr_fea = self.gdf.expand(distance)
         
         for conv_func in self.convs:
             atom_fea, nbr_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
@@ -280,11 +282,14 @@ class CrystalGraphConvNet(nn.Module):
             bond_constant = self.bond_const_softplus(self.bond_constant_bn(bond_constant.view(-1, C)).view(N, M, C))
             bond_constant = torch.mean(bond_constant, dim=2).unsqueeze(-1) / len(bond_constant)
 
+        
+        
         if self.energy_mode == "Morse" or self.energy_mode == "LJ":
             const_D = bond_fea
             const_D = self.D_layer(const_D)
             N, M, C = const_D.shape
             const_D = self.D_softplus(self.const_D_bn(const_D.view(-1,C)).view(N,M,C))
+
             
             if hasattr(self, 'D_fcs') and hasattr(self, 'D_softpluses'):
                 for fc, softplus,bn in zip(self.D_fcs, self.D_softpluses, self.D_bn):
@@ -313,9 +318,10 @@ class CrystalGraphConvNet(nn.Module):
                 LJ_energy = (const_D/len(const_D)) * ((bond_distance/distance)**12 - 2*(bond_distance/distance)**6)
                 potential_E = LJ_energy + bond_energy
             else:
+#                 bond_energy = torch.abs(bond_constant*(bond_distance-distance)**2.) 
                 potential_E = bond_constant*(bond_distance-distance)**2
             
-            grad_E = potential_E.sum()
+            grad_E = potential_E.sum() #.sum()
             grad = torch.autograd.grad(grad_E, atom_pos, retain_graph=True, create_graph=True)[0]
             
             grad[fixed_atom_idx] = 0
@@ -337,6 +343,7 @@ class CrystalGraphConvNet(nn.Module):
             step_count += 1
 
 #         return atom_pos, free_atom_idx, ads_idx
+
         return atom_pos[free_atom_idx]
   
     def get_distance(self, atom_pos, cells, nbr_fea_offset, nbr_fea_idx):
@@ -351,3 +358,50 @@ class CrystalGraphConvNet(nn.Module):
         
         distance = torch.sqrt(differ_sum).unsqueeze(-1)            
         return distance
+    
+    def pooling(self, bond_fea_layer, crystal_atom_idx):
+        """
+        Pooling the atom features to crystal features
+
+        N: Total number of atoms in the batch
+        N0: Total number of crystals in the batch
+
+        Parameters
+        ----------
+
+        atom_fea: Variable(torch.Tensor) shape (N, 1)
+          Atom feature vectors of the batch
+        crystal_atom_idx: list of torch.LongTensor of length N0
+          Mapping from the crystal idx to atom idx
+        distances: torch.Tensor shape (N, 1)
+          Storing connectivity information of atoms        
+        """
+        assert sum([len(idx_map) for idx_map in crystal_atom_idx]) ==\
+            bond_fea_layer.data.shape[0]
+#         assert sum([len(idx_map) for idx_map in crystal_fixed_atom_idx]) ==\
+#             fixed_atom_idx.data.shape[0]
+        
+        
+        summed_fea = torch.unsqueeze(torch.stack([torch.mean(bond_fea_layer[idx_map]) for idx_map in crystal_atom_idx]),1)
+        
+        
+        return summed_fea
+class GaussianDistance(object):
+    """
+    Expands the distance by Gaussian basis.
+
+    Unit: angstrom
+    """
+    def __init__(self, dmin, dmax, step_size, var=None):
+
+        assert dmin < dmax
+        assert dmax - dmin > step_size
+        self.filter = torch.arange(dmin, dmax+step_size, step_size).cuda()
+        if var is None:
+            var = step_size
+        self.var = var
+
+    def expand(self, distances):
+        return torch.exp(-(distances - self.filter)**2 /
+                      self.var**2)
+    

@@ -132,7 +132,7 @@ class CrystalGraphConvNet(nn.Module):
         self.classification = classification
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
         
-#         self.gdf = GaussianDistance(dmin=0, dmax=radius, step_size=step_size)
+        self.gdf = GaussianDistance(dmin=0, dmax=radius, step_size=step_size)
 
         
         self.convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
@@ -228,15 +228,14 @@ class CrystalGraphConvNet(nn.Module):
           Per atom contributions
 
         """
-        
         atom_pos = atom_pos.requires_grad_(True)
         atom_fea = self.embedding(atom_fea)
         
         free_atom_idx = np.where(fixed_atom_mask.cpu().numpy() == 0)[0]
         fixed_atom_idx = np.where(fixed_atom_mask.cpu().numpy() == 1)[0]
         ads_idx = np.where(ads_tag_base.cpu().numpy() == 1)[0]
-        
         distance = self.get_distance(atom_pos, cells, nbr_fea_offset, nbr_fea_idx)
+#         nbr_fea = self.gdf.expand(distance)
         
         for conv_func in self.convs:
             atom_fea, nbr_fea = conv_func(atom_fea, nbr_fea, nbr_fea_idx)
@@ -267,78 +266,81 @@ class CrystalGraphConvNet(nn.Module):
             
         
         #Second set of dense networks to predict the spring constant for each spring
-        bond_const_fea = bond_fea
-        bond_constant = self.bond_constant(bond_const_fea)
-        N, M, C = bond_constant.shape
+#         bond_const_fea = bond_fea
+#         bond_constant = self.bond_constant(bond_const_fea)
+#         N, M, C = bond_constant.shape
         
-        if hasattr(self, 'const_fcs') and hasattr(self, 'const_softpluses'):
-            bond_constant = self.bond_const_softplus(self.bond_constant_bn(bond_constant.view(-1, C)).view(N, M, C))
-            for fc, softplus,bn in zip(self.const_fcs, self.const_softpluses, self.const_bn):
-                bond_constant = softplus(bn(fc(bond_constant).view(-1,C)).view(N,M,C))
-            bond_constant = self.bond_const_softplus(self.bond_constant2(bond_constant)) / len(bond_constant)
-        else:
-            bond_constant = self.bond_const_softplus(self.bond_constant_bn(bond_constant.view(-1, C)).view(N, M, C))
-            bond_constant = torch.mean(bond_constant, dim=2).unsqueeze(-1) / len(bond_constant)
+#         if hasattr(self, 'const_fcs') and hasattr(self, 'const_softpluses'):
+#             bond_constant = self.bond_const_softplus(self.bond_constant_bn(bond_constant.view(-1, C)).view(N, M, C))
+#             for fc, softplus,bn in zip(self.const_fcs, self.const_softpluses, self.const_bn):
+#                 bond_constant = softplus(bn(fc(bond_constant).view(-1,C)).view(N,M,C))
+#             bond_constant = self.bond_const_softplus(self.bond_constant2(bond_constant))
+#         else:
+#             bond_constant = self.bond_const_softplus(self.bond_constant_bn(bond_constant.view(-1, C)).view(N, M, C))
+#             bond_constant = torch.mean(bond_constant, dim=2).unsqueeze(-1)/len(bond_constant)
 
-        if self.energy_mode == "Morse" or self.energy_mode == "LJ":
-            const_D = bond_fea
-            const_D = self.D_layer(const_D)
-            N, M, C = const_D.shape
-            const_D = self.D_softplus(self.const_D_bn(const_D.view(-1,C)).view(N,M,C))
+        
+        
+#         if self.energy_mode == "Morse" or self.energy_mode == "LJ":
+#             const_D = bond_fea
+#             const_D = self.D_layer(const_D)
+#             N, M, C = const_D.shape
+#             const_D = self.D_softplus(self.const_D_bn(const_D.view(-1,C)).view(N,M,C))
+
             
-            if hasattr(self, 'D_fcs') and hasattr(self, 'D_softpluses'):
-                for fc, softplus,bn in zip(self.D_fcs, self.D_softpluses, self.D_bn):
-                    const_D = softplus(bn(fc(const_D).view(-1,C)).view(N,M,C))
-            if self.energy_mode == "Morse":
-                const_D = self.D_softplus(self.D_constant(const_D))
-            else:
-                const_D = self.D_sigmoid(self.D_constant(const_D))
+#             if hasattr(self, 'D_fcs') and hasattr(self, 'D_softpluses'):
+#                 for fc, softplus,bn in zip(self.D_fcs, self.D_softpluses, self.D_bn):
+#                     const_D = softplus(bn(fc(const_D).view(-1,C)).view(N,M,C))
+#             if self.energy_mode == "Morse":
+#                 const_D = self.D_softplus(self.D_constant(const_D))
+#             else:
+#                 const_D = self.D_sigmoid(self.D_constant(const_D))
 
         
-        steepest_descent_step=torch.FloatTensor([1.0])
-        V = torch.tensor(0.0)
-        save_track = [atom_pos]
-        grad = torch.FloatTensor([100.0])
-        step_count = 0
+#         steepest_descent_step=torch.FloatTensor([1.0])
+#         V = torch.tensor(0.0)
+#         save_track = [atom_pos]
+#         grad = torch.FloatTensor([100.0])
+#         step_count = 0
                                          
-        while (torch.max(torch.abs(steepest_descent_step))>0.0005 and step_count<self.max_opt_steps) or step_count<self.min_opt_steps:
+#         while (torch.max(torch.abs(steepest_descent_step))>0.0005 and step_count<self.max_opt_steps) or step_count<self.min_opt_steps:
 
-            distance = self.get_distance(atom_pos, cells, nbr_fea_offset, nbr_fea_idx)
+#             distance = self.get_distance(atom_pos, cells, nbr_fea_offset, nbr_fea_idx)
             
-            if self.energy_mode == "Morse":
-                alpha = torch.sqrt(bond_constant/(2*const_D))
-                potential_E = const_D * (1 - torch.exp(-alpha*(distance-bond_distance)))**2
-            elif self.energy_mode == "LJ":
-                bond_energy = bond_constant*(bond_distance-distance)**2
-                LJ_energy = (const_D/len(const_D)) * ((bond_distance/distance)**12 - 2*(bond_distance/distance)**6)
-                potential_E = LJ_energy + bond_energy
-            else:
-                potential_E = bond_constant*(bond_distance-distance)**2
+#             if self.energy_mode == "Morse":
+#                 alpha = torch.sqrt(bond_constant/(2*const_D))
+#                 potential_E = const_D * (1 - torch.exp(-alpha*(distance-bond_distance)))**2
+#             elif self.energy_mode == "LJ":
+#                 bond_energy = bond_constant*(bond_distance-distance)**2
+#                 LJ_energy = (const_D/len(const_D)) * ((bond_distance/distance)**12 - 2*(bond_distance/distance)**6)
+#                 potential_E = LJ_energy + bond_energy
+#             else:
+# #                 bond_energy = torch.abs(bond_constant*(bond_distance-distance)**2.) 
+#                 potential_E = bond_constant*(bond_distance-distance)**2
             
-            grad_E = potential_E.sum()
-            grad = torch.autograd.grad(grad_E, atom_pos, retain_graph=True, create_graph=True)[0]
+#             grad_E = potential_E.sum() #.sum()
+#             grad = torch.autograd.grad(grad_E, atom_pos, retain_graph=True, create_graph=True)[0]
             
-            grad[fixed_atom_idx] = 0
-            if grad_E == torch.Tensor([float('inf')]).cuda():
-                print('grad_E becomes inf')
-            #detect if step is going off the rails
-            if torch.max(torch.isnan(grad)) == 1:
-                print('nan')
-                return atom_pos[free_atom_idx]
-            if torch.max(torch.abs(self.opt_step_size*grad))>5.0:
-                print('blow up')
-                return atom_pos[free_atom_idx]
+#             grad[fixed_atom_idx] = 0
+#             if grad_E == torch.Tensor([float('inf')]).cuda():
+#                 print('grad_E becomes inf')
+#             #detect if step is going off the rails
+#             if torch.max(torch.isnan(grad)) == 1:
+#                 print('nan')
+#                 return atom_pos[free_atom_idx]
+#             if torch.max(torch.abs(self.opt_step_size*grad))>5.0:
+#                 print('blow up')
+#                 return atom_pos[free_atom_idx]
 
-            steepest_descent_step =  - self.opt_step_size*grad
+#             steepest_descent_step =  - self.opt_step_size*grad
     
-            #### Momentum 
-            V = self.momentum*V + (1-self.momentum)*grad
-            atom_pos = atom_pos - self.opt_step_size * V
-            step_count += 1
-
-#         return atom_pos, free_atom_idx, ads_idx
-        return atom_pos[free_atom_idx]
-  
+#             #### Momentum 
+#             V = self.momentum*V + (1-self.momentum)*grad
+#             atom_pos = atom_pos - self.opt_step_size * V
+#             step_count += 1
+        distance_final = self.get_distance(atom_pos_final, cells, nbr_fea_offset, nbr_fea_idx)
+        return bond_distance.squeeze(-1)
+    
     def get_distance(self, atom_pos, cells, nbr_fea_offset, nbr_fea_idx):
         nbr_pos = atom_pos[nbr_fea_idx]
         differ = nbr_pos - atom_pos.unsqueeze(1)+ torch.bmm(nbr_fea_offset, cells)
@@ -352,49 +354,49 @@ class CrystalGraphConvNet(nn.Module):
         distance = torch.sqrt(differ_sum).unsqueeze(-1)            
         return distance
     
-        
-#     def pooling(self, bond_fea_layer, crystal_atom_idx):
-#         """
-#         Pooling the atom features to crystal features
+    def pooling(self, bond_fea_layer, crystal_atom_idx):
+        """
+        Pooling the atom features to crystal features
 
-#         N: Total number of atoms in the batch
-#         N0: Total number of crystals in the batch
+        N: Total number of atoms in the batch
+        N0: Total number of crystals in the batch
 
-#         Parameters
-#         ----------
+        Parameters
+        ----------
 
-#         atom_fea: Variable(torch.Tensor) shape (N, 1)
-#           Atom feature vectors of the batch
-#         crystal_atom_idx: list of torch.LongTensor of length N0
-#           Mapping from the crystal idx to atom idx
-#         distances: torch.Tensor shape (N, 1)
-#           Storing connectivity information of atoms        
-#         """
-#         assert sum([len(idx_map) for idx_map in crystal_atom_idx]) ==\
-#             bond_fea_layer.data.shape[0]
-# #         assert sum([len(idx_map) for idx_map in crystal_fixed_atom_idx]) ==\
-# #             fixed_atom_idx.data.shape[0]
-        
-        
-#         summed_fea = torch.unsqueeze(torch.stack([torch.mean(bond_fea_layer[idx_map]) for idx_map in crystal_atom_idx]),1)
+        atom_fea: Variable(torch.Tensor) shape (N, 1)
+          Atom feature vectors of the batch
+        crystal_atom_idx: list of torch.LongTensor of length N0
+          Mapping from the crystal idx to atom idx
+        distances: torch.Tensor shape (N, 1)
+          Storing connectivity information of atoms        
+        """
+        assert sum([len(idx_map) for idx_map in crystal_atom_idx]) ==\
+            bond_fea_layer.data.shape[0]
+#         assert sum([len(idx_map) for idx_map in crystal_fixed_atom_idx]) ==\
+#             fixed_atom_idx.data.shape[0]
         
         
-#         return summed_fea
-# class GaussianDistance(object):
-#     """
-#     Expands the distance by Gaussian basis.
+        summed_fea = torch.unsqueeze(torch.stack([torch.mean(bond_fea_layer[idx_map]) for idx_map in crystal_atom_idx]),1)
+        
+        
+        return summed_fea
+class GaussianDistance(object):
+    """
+    Expands the distance by Gaussian basis.
 
-#     Unit: angstrom
-#     """
-#     def __init__(self, dmin, dmax, step_size, var=None):
+    Unit: angstrom
+    """
+    def __init__(self, dmin, dmax, step_size, var=None):
 
-#         assert dmin < dmax
-#         assert dmax - dmin > step_size
-#         self.filter = torch.arange(dmin, dmax+step_size, step_size).cuda()
-#         if var is None:
-#             var = step_size
-#         self.var = var
+        assert dmin < dmax
+        assert dmax - dmin > step_size
+        self.filter = torch.arange(dmin, dmax+step_size, step_size).cuda()
+        if var is None:
+            var = step_size
+        self.var = var
 
-#     def expand(self, distances):
-#         return torch.exp(-(distances - self.filter)**2 /
-#                       self.var**2)
+    def expand(self, distances):
+        return torch.exp(-(distances - self.filter)**2 /
+                      self.var**2)
+    

@@ -106,14 +106,20 @@ def collate_pool(dataset_list):
         batch_ads_tag.append(torch.LongTensor(ads_tag))
         
         ads_idx = np.where(ads_tag == 1)[0]
-
+        
+        
+        
         if type(target) is not float:
-            batch_target.append(torch.Tensor(target[0]).view(-1,3))
+#             batch_target.append(torch.Tensor(target[0]).view(-1,3))
+#             batch_target.append(torch.sqrt(torch.tensor(10.)) * torch.Tensor(target[0]).squeeze(-1))
+            batch_target.append(torch.Tensor(target[0]).squeeze(-1))
+    
+
+
         else:
             batch_target.append(torch.Tensor([0]))
 
-        batch_atom_pos_final.append(atom_pos_final.view(-1,3)) 
-        
+        batch_atom_pos_final.append(atom_pos_final.view(-1,3))
         
     
         cell_idx += 1

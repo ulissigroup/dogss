@@ -183,7 +183,7 @@ train_test_splitter = ShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
 # train_test_splitter = ShuffleSplit(n_splits=1, test_size=0.1, random_state=22)
 
 
-batchsize = 36
+batchsize = 20
 # warm restart scheduling from https://arxiv.org/pdf/1711.05101.pdf
 # LR_schedule = LRScheduler(CosineLRWithRestarts, batch_size=batchsize, epoch_size=len(SDT_training), restart_period=10, t_mult=1.2)
 
@@ -211,17 +211,17 @@ net = MyNet(
     module__nbr_fea_len = nbr_fea_len,
     batch_size=batchsize, #214
     module__classification=False,
-    lr=0.031661769560912136,
+    lr=0.028446171826811632,
     max_epochs= 200,
     module__energy_mode="Harmonic", #["Harmonic", "Morse", "LJ"], Default = "Harmonic"
-    module__atom_fea_len=131, #46,
-    module__h_fea_len=251,
-    module__h_fea_len_dist=112,
-    module__h_fea_len_const=112,
+    module__atom_fea_len=128, #46,
+    module__h_fea_len=105,
+    module__h_fea_len_dist=71,
+    module__h_fea_len_const=71,
 #     module__h_fea_len_D=(3,256),
-    module__n_conv=11, #8
-    module__n_h_dist=6,
-    module__n_h_const=6,
+    module__n_conv=9, #8
+    module__n_h_dist=0,
+    module__n_h_const=0,
     optimizer__weight_decay=0.000045399929762484854,
 #     module__n_h_D=(1,12),
 #     module__max_num_nbr=12, #9
